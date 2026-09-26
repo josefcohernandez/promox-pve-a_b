@@ -1,0 +1,70 @@
+#cloud-config
+hostname: __HOSTNAME__
+fqdn: __HOSTNAME__.__LAN_DOMAIN__
+manage_etc_hosts: true
+timezone: Europe/Madrid
+locale: es_ES.UTF-8
+
+users:
+  - name: __VM_USER__
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+ssh_pwauth: false
+package_update: true
+package_upgrade: true
+packages:
+  - qemu-guest-agent
+  - docker.io
+  - docker-compose-v2
+  - git
+  - curl
+  - jq
+  - unzip
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "20m", "max-file": "3" }
+      }
+  # Sin ruta por defecto por la VLAN lab: solo LAN tiene gateway (lo fija cloud-init de Proxmox)
+  - path: /home/__VM_USER__/.bash_aliases
+    owner: __VM_USER__:__VM_USER__
+    content: |
+      alias k=kubectl
+      source <(kubectl completion bash) 2>/dev/null
+      complete -o default -F __start_kubectl k
+      source <(helm completion bash) 2>/dev/null
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now docker
+  # kubectl (repo oficial, serie 1.36 = la de RKE2 del lab)
+  - mkdir -p /etc/apt/keyrings
+  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+  - apt-get update && apt-get install -y kubectl
+  # OpenTofu (paquete deb oficial)
+  - curl -fsSL https://get.opentofu.org/install-opentofu.sh -o /tmp/install-opentofu.sh
+  - bash /tmp/install-opentofu.sh --install-method deb
+  # Helm
+  - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  # Argo CD CLI
+  - curl -fsSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 && chmod +x /usr/local/bin/argocd
+  # MinIO client
+  - curl -fsSL -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x /usr/local/bin/mc
+  # k9s
+  - curl -fsSL https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.deb -o /tmp/k9s.deb && apt-get install -y /tmp/k9s.deb
+  - mkdir -p /home/__VM_USER__/repos /home/__VM_USER__/.kube && chown -R __VM_USER__:__VM_USER__ /home/__VM_USER__
+
+final_message: "dev lista tras $UPTIME s"

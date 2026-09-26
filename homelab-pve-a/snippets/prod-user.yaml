@@ -1,0 +1,47 @@
+#cloud-config
+hostname: __HOSTNAME__
+fqdn: __HOSTNAME__.__LAN_DOMAIN__
+manage_etc_hosts: true
+timezone: Europe/Madrid
+locale: es_ES.UTF-8
+
+users:
+  - name: __VM_USER__
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+ssh_pwauth: false
+package_update: true
+package_upgrade: true
+packages:
+  - qemu-guest-agent
+  - docker.io
+  - docker-compose-v2
+  - git
+  - curl
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "20m", "max-file": "3" }
+      }
+  - path: /etc/sysctl.d/99-prod.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      fs.inotify.max_user_instances = 1024
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now docker
+  - sysctl --system
+  - mkdir -p /srv/compose && chown __VM_USER__:__VM_USER__ /srv/compose
+  - mkdir -p /srv/data && chown __VM_USER__:__VM_USER__ /srv/data
+
+final_message: "prod lista tras $UPTIME s"
