@@ -8,6 +8,7 @@
 #   ./pve-a.sh dev       -> VM 110
 #   ./pve-a.sh pbs       -> LXC 120 con PBS, datastore en NFS, storage en PVE y job de backup
 #   ./pve-a.sh all       -> template + prod + dev + pbs   (tras el reinicio de 'host')
+#   ./pve-a.sh macs      -> muestra las MACs de cada máquina (para reservas DHCP en el MikroTik)
 #
 # Orden la primera vez:  wipe -> host -> reboot -> all
 set -euo pipefail
@@ -23,6 +24,16 @@ done
 [[ "$NAS_IP" != *X* ]] || { echo "NAS_IP sigue con el valor de ejemplo"; exit 1; }
 [[ "$PBS_ROOT_PASSWORD" != "cambiame" ]] || { echo "Cambia PBS_ROOT_PASSWORD"; exit 1; }
 [[ $EUID -eq 0 ]] || { echo "Ejecutar como root"; exit 1; }
+
+# Valores por defecto de hostname / MAC (IP vacía = DHCP)
+PROD_HOSTNAME="${PROD_HOSTNAME:-prod}"
+DEV_HOSTNAME="${DEV_HOSTNAME:-dev}"
+PBS_HOSTNAME="${PBS_HOSTNAME:-pbs}"
+mac_for() { printf 'BC:24:11:A0:%02X:%02X' "$1" "$2"; }   # <vmid> <nic>  -> MAC fija y predecible
+PROD_MAC="${PROD_MAC:-$(mac_for 100 0)}"
+DEV_MAC="${DEV_MAC:-$(mac_for 110 0)}"
+PBS_MAC="${PBS_MAC:-$(mac_for 120 0)}"
+PROD_IP="${PROD_IP:-}"; DEV_IP="${DEV_IP:-}"; PBS_IP="${PBS_IP:-}"
 
 SNIPPETS_DIR="/var/lib/vz/snippets"
 IMG_DIR="/var/lib/vz/template/iso"
@@ -142,6 +153,19 @@ render_snippet() {  # render_snippet <src.yaml> <dst-name> <hostname>
       "$1" > "${SNIPPETS_DIR}/$2"
 }
 
+ipcfg_lan() {  # ipcfg_lan <ip|vacío>  -> valor para --ipconfigN en LAN
+  [[ -n "$1" ]] && echo "ip=$1/${LAN_CIDR},gw=${LAN_GW}" || echo "ip=dhcp"
+}
+
+vm_ips() {  # vm_ips <vmid> -> IPs v4 según el guest agent
+  qm agent "$1" network-get-interfaces 2>/dev/null | python3 -c '
+import sys,json
+for i in json.load(sys.stdin):
+    if i["name"]=="lo": continue
+    ips=[a["ip-address"] for a in i.get("ip-addresses",[]) if a["ip-address-type"]=="ipv4"]
+    print(f"    {i[\"name\"]:6} {i.get(\"hardware-address\",\"\"):18} {\" \".join(ips) or \"(sin IP)\"}")' 2>/dev/null || echo "    (agent no disponible aún)"
+}
+
 wait_for_agent() {  # wait_for_agent <vmid> <segundos>
   local i=0
   until qm agent "$1" ping >/dev/null 2>&1; do
@@ -183,34 +207,34 @@ stage_template() {
 
 # ---------------------------------------------------------------- prod
 stage_prod() {
-  log "VM 100 prod"
+  log "VM 100 ${PROD_HOSTNAME}"
   qm destroy 100 --purge 1 2>/dev/null || true
-  render_snippet "${HERE}/snippets/prod-user.yaml" prod-user.yaml prod
-  qm clone 9000 100 --name prod --full 1
+  render_snippet "${HERE}/snippets/prod-user.yaml" prod-user.yaml "$PROD_HOSTNAME"
+  qm clone 9000 100 --name "$PROD_HOSTNAME" --full 1
   qm set 100 --cores 2 --memory 8192 --balloon 0 --onboot 1 --startup order=1 --tags prod
-  qm set 100 --net0 virtio,bridge=vmbr0
-  qm set 100 --ipconfig0 "ip=${PROD_IP}/${LAN_CIDR},gw=${LAN_GW}"
+  qm set 100 --net0 "virtio=${PROD_MAC},bridge=vmbr0"
+  qm set 100 --ipconfig0 "$(ipcfg_lan "$PROD_IP")"
   qm set 100 --cicustom "user=local:snippets/prod-user.yaml"
   qm resize 100 scsi0 250G
   qm start 100
   wait_for_agent 100 300
+  vm_ips 100
 }
 
 # ---------------------------------------------------------------- dev
 stage_dev() {
-  log "VM 110 dev"
+  log "VM 110 ${DEV_HOSTNAME}"
   qm destroy 110 --purge 1 2>/dev/null || true
-  render_snippet "${HERE}/snippets/dev-user.yaml" dev-user.yaml dev
-  qm clone 9000 110 --name dev --full 1
+  render_snippet "${HERE}/snippets/dev-user.yaml" dev-user.yaml "$DEV_HOSTNAME"
+  qm clone 9000 110 --name "$DEV_HOSTNAME" --full 1
   qm set 110 --cores 2 --memory 12288 --balloon 0 --onboot 1 --startup order=2 --tags dev
-  qm set 110 --net0 virtio,bridge=vmbr0
-  qm set 110 --net1 "virtio,bridge=vmbr0,tag=${LAB_TAG}"
-  qm set 110 --ipconfig0 "ip=${DEV_IP}/${LAN_CIDR},gw=${LAN_GW}"
-  qm set 110 --ipconfig1 "ip=${DEV_LAB_IP}/24"
+  qm set 110 --net0 "virtio=${DEV_MAC},bridge=vmbr0"
+  qm set 110 --ipconfig0 "$(ipcfg_lan "$DEV_IP")"
   qm set 110 --cicustom "user=local:snippets/dev-user.yaml"
   qm resize 110 scsi0 200G
   qm start 110
   wait_for_agent 110 600
+  vm_ips 110
 }
 
 # ---------------------------------------------------------------- pbs
@@ -226,17 +250,26 @@ stage_pbs() {
   [[ -n "$tmpl" ]] || { echo "No encuentro plantilla debian-13-standard"; exit 1; }
   [[ -f "/var/lib/vz/template/cache/${tmpl}" ]] || pveam download local "$tmpl"
 
+  local pbs_net
+  if [[ -n "$PBS_IP" ]]; then pbs_net="ip=${PBS_IP}/${LAN_CIDR},gw=${LAN_GW}"; else pbs_net="ip=dhcp"; fi
   pct create 120 "local:vztmpl/${tmpl}" \
-    --hostname pbs --unprivileged 1 --features nesting=1 \
+    --hostname "$PBS_HOSTNAME" --unprivileged 1 --features nesting=1 \
     --cores 1 --memory 2048 --swap 512 \
     --rootfs "${STORAGE}:8" \
-    --net0 "name=eth0,bridge=vmbr0,ip=${PBS_IP}/${LAN_CIDR},gw=${LAN_GW}" \
+    --net0 "name=eth0,bridge=vmbr0,hwaddr=${PBS_MAC},${pbs_net}" \
     --nameserver "$LAN_DNS" --searchdomain "$LAN_DOMAIN" \
     --password "$PBS_ROOT_PASSWORD" \
     --onboot 1 --startup order=3 --tags pbs
   pct set 120 --mp0 "${NFS_MNT},mp=/mnt/datastore/nas"
   pct start 120
-  sleep 10
+  local pbs_addr="$PBS_IP" i=0
+  until [[ -n "$pbs_addr" ]]; do
+    sleep 3; i=$((i+3))
+    pbs_addr="$(pct exec 120 -- hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ $i -lt 90 ]] || { echo "El LXC 120 no ha obtenido IP por DHCP en 90 s"; exit 1; }
+  done
+  echo "  PBS en ${pbs_addr} (MAC ${PBS_MAC})"
+  sleep 5
 
   log "Instalando PBS dentro del LXC"
   pct exec 120 -- bash -ceu '
@@ -262,12 +295,23 @@ EOF
   local fp
   fp="$(pct exec 120 -- proxmox-backup-manager cert info | awk '/Fingerprint/{print $NF}')"
   pvesm remove nas-pbs 2>/dev/null || true
-  pvesm add pbs nas-pbs --server "$PBS_IP" --datastore nas \
+  pvesm add pbs nas-pbs --server "$pbs_addr" --datastore nas \
     --username root@pam --password "$PBS_ROOT_PASSWORD" --fingerprint "$fp" --content backup
   pvesh create /cluster/backup --id daily-prod-dev --storage nas-pbs --vmid 100,110 \
     --schedule "03:00" --mode snapshot --enabled 1 --notes-template '{{guestname}}' \
     --prune-backups keep-daily=7,keep-weekly=4,keep-monthly=3
-  echo "  PBS web: https://${PBS_IP}:8007  (root@pam)"
+  echo "  PBS web: https://${pbs_addr}:8007  (root@pam)"
+  [[ -n "$PBS_IP" ]] || warn "PBS va por DHCP: el storage 'nas-pbs' apunta a ${pbs_addr}. Reserva esa IP para ${PBS_MAC} en el MikroTik o los backups fallarán si cambia."
+}
+
+print_macs() {
+  cat <<EOF
+
+  MACs de las máquinas (para las reservas DHCP en el MikroTik):
+    100 ${PROD_HOSTNAME}  LAN  ${PROD_MAC}
+    110 ${DEV_HOSTNAME}   LAN  ${DEV_MAC}
+    120 ${PBS_HOSTNAME}   LAN  ${PBS_MAC}
+EOF
 }
 
 # ---------------------------------------------------------------- main
@@ -278,7 +322,8 @@ case "${1:-}" in
   prod)     stage_prod ;;
   dev)      stage_dev ;;
   pbs)      stage_pbs ;;
+  macs)     print_macs ;;
   all)      stage_template; stage_prod; stage_dev; stage_pbs
-            log "pve-a completo"; qm list; pct list ;;
+            log "pve-a completo"; qm list; pct list; print_macs ;;
   *) sed -n '2,12p' "$0"; exit 1 ;;
 esac
