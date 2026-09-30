@@ -60,3 +60,16 @@ PBS: `https://<ip-pbs>:8007` (root@pam, la contraseña de `pve-a.env`).
 
 Borra jobs de backup, todas las VMs y LXC (con sus discos), discos huérfanos de `local-lvm`, storages PBS y snippets.
 No toca `local` (ISOs, plantillas LXC descargadas) ni la configuración de red. Pide dos confirmaciones.
+
+## Pendiente
+
+Tareas manuales fuera del repo (marcar al completar):
+
+- [ ] VMs ya creadas antes de la consola gráfica: `qm set 100 --vga std`, `qm set 110 --vga std`, `qm set 9000 --vga std`,
+      y `qm shutdown` + `qm start` de 100 y 110 (un reboot desde dentro no aplica el cambio).
+- [ ] Password de consola en las VMs ya creadas (cloud-init solo la pone en el primer arranque): `sudo passwd <VM_USER>` en prod y dev.
+- [ ] Primer backup (`vzdump 100 --storage nas-pbs --mode snapshot`) y restauración de prueba a un VMID libre con `qmrestore`.
+- [ ] MikroTik: reserva DHCP de la IP del PBS (el storage `nas-pbs` apunta a la IP, no al nombre).
+- [ ] Synology: snapshots semanales de `pbs` y `k8s-nfs` (retener 4); crear carpetas `k8s-nfs` y `tofu-state-mirror`.
+- [ ] Copia fuera del NAS (Hyper Backup a nube o USB, o PBS remoto con sync job): hoy todas las copias están en el mismo Synology.
+- [ ] Espejo diario del estado de tofu (`mc mirror` del MinIO de prod a `tofu-state-mirror`), cuando MinIO esté en prod.
