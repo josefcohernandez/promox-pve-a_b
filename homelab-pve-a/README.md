@@ -26,7 +26,7 @@ reservas DHCP en el MikroTik **antes** de ejecutar el script (`./pve-a.sh macs` 
 ```bash
 scp -r homelab-pve-a root@<ip-actual-del-nodo>:/root/ && ssh root@<ip-actual-del-nodo>
 cd /root/homelab-pve-a
-cp pve-a.env.example pve-a.env && nano pve-a.env     # SSH_PUBKEY, NAS_IP, PBS_ROOT_PASSWORD (+ IPs/hostnames si quieres)
+cp pve-a.env.example pve-a.env && nano pve-a.env     # SSH_PUBKEY, VM_PASSWORD, NAS_IP, PBS_ROOT_PASSWORD (+ IPs/hostnames si quieres)
 
 ./pve-a.sh wipe     # pide escribir el hostname y BORRAR; deja el nodo vacío
 ./pve-a.sh host     # hostname pve-a, vmbr0 VLAN-aware con .11, snippets, NFS
@@ -38,6 +38,8 @@ cd /root/homelab-pve-a && ./pve-a.sh all
 `all` tarda 10–20 min: descarga la imagen (824 MB), clona, y cloud-init instala Docker en prod y el tooling en dev.
 Al final imprime las IPs que ha obtenido cada máquina (vía guest agent) y las MACs.
 Cada etapa (`template`, `prod`, `dev`, `pbs`) se puede relanzar sola: destruye y recrea solo esa máquina.
+**Ojo:** `prod` y `dev` destruyen la VM con sus discos (se pierde todo lo que haya dentro). `pbs` sí conserva las copias:
+el datastore vive en el NAS y, si ya existe, se reutiliza.
 
 Si PBS va por DHCP, el script descubre su IP y registra el storage `nas-pbs` con ella: reserva esa IP en el router,
 porque Proxmox guarda la IP, no el nombre.
