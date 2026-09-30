@@ -26,7 +26,7 @@ reservas DHCP en el MikroTik **antes** de ejecutar el script (`./pve-a.sh macs` 
 ```bash
 scp -r homelab-pve-a root@<ip-actual-del-nodo>:/root/ && ssh root@<ip-actual-del-nodo>
 cd /root/homelab-pve-a
-cp pve-a.env.example pve-a.env && nano pve-a.env     # SSH_PUBKEY, NAS_IP, PBS_ROOT_PASSWORD (+ IPs/hostnames si quieres)
+cp pve-a.env.example pve-a.env && nano pve-a.env     # SSH_PUBKEY, VM_PASSWORD, NAS_IP, PBS_ROOT_PASSWORD (+ IPs/hostnames si quieres)
 
 ./pve-a.sh wipe     # pide escribir el hostname y BORRAR; deja el nodo vacío
 ./pve-a.sh host     # hostname pve-a, vmbr0 VLAN-aware con .11, snippets, NFS
@@ -38,6 +38,8 @@ cd /root/homelab-pve-a && ./pve-a.sh all
 `all` tarda 10–20 min: descarga la imagen (824 MB), clona, y cloud-init instala Docker en prod y el tooling en dev.
 Al final imprime las IPs que ha obtenido cada máquina (vía guest agent) y las MACs.
 Cada etapa (`template`, `prod`, `dev`, `pbs`) se puede relanzar sola: destruye y recrea solo esa máquina.
+**Ojo:** `prod` y `dev` destruyen la VM con sus discos (se pierde todo lo que haya dentro). `pbs` sí conserva las copias:
+el datastore vive en el NAS y, si ya existe, se reutiliza.
 
 Si PBS va por DHCP, el script descubre su IP y registra el storage `nas-pbs` con ella: reserva esa IP en el router,
 porque Proxmox guarda la IP, no el nombre.
@@ -58,3 +60,16 @@ PBS: `https://<ip-pbs>:8007` (root@pam, la contraseña de `pve-a.env`).
 
 Borra jobs de backup, todas las VMs y LXC (con sus discos), discos huérfanos de `local-lvm`, storages PBS y snippets.
 No toca `local` (ISOs, plantillas LXC descargadas) ni la configuración de red. Pide dos confirmaciones.
+
+## Pendiente
+
+Tareas manuales fuera del repo (marcar al completar):
+
+- [ ] VMs ya creadas antes de la consola gráfica: `qm set 100 --vga std`, `qm set 110 --vga std`, `qm set 9000 --vga std`,
+      y `qm shutdown` + `qm start` de 100 y 110 (un reboot desde dentro no aplica el cambio).
+- [ ] Password de consola en las VMs ya creadas (cloud-init solo la pone en el primer arranque): `sudo passwd <VM_USER>` en prod y dev.
+- [ ] Primer backup (`vzdump 100 --storage nas-pbs --mode snapshot`) y restauración de prueba a un VMID libre con `qmrestore`.
+- [ ] MikroTik: reserva DHCP de la IP del PBS (el storage `nas-pbs` apunta a la IP, no al nombre).
+- [ ] Synology: snapshots semanales de `pbs` y `k8s-nfs` (retener 4); crear carpetas `k8s-nfs` y `tofu-state-mirror`.
+- [ ] Copia fuera del NAS (Hyper Backup a nube o USB, o PBS remoto con sync job): hoy todas las copias están en el mismo Synology.
+- [ ] Espejo diario del estado de tofu (`mc mirror` del MinIO de prod a `tofu-state-mirror`), cuando MinIO esté en prod.

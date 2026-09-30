@@ -10,7 +10,9 @@ users:
     groups: [sudo, docker]
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: true
+    # Password solo para la consola de Proxmox (emergencias); SSH sigue solo con clave
+    lock_passwd: false
+    passwd: "__VM_PASSWD_HASH__"
     ssh_authorized_keys:
       - __SSH_PUBKEY__
 

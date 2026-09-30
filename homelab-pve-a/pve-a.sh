@@ -18,11 +18,12 @@ ENV_FILE="${HERE}/pve-a.env"
 [[ -f "$ENV_FILE" ]] || { echo "Falta ${ENV_FILE} (copia pve-a.env.example)"; exit 1; }
 # shellcheck disable=SC1090
 source "$ENV_FILE"
-for v in SSH_PUBKEY VM_USER NAS_IP PBS_ROOT_PASSWORD NODE_NAME NODE_IP LAN_GW STORAGE; do
+for v in SSH_PUBKEY VM_USER VM_PASSWORD NAS_IP PBS_ROOT_PASSWORD NODE_NAME NODE_IP LAN_GW STORAGE; do
   [[ -n "${!v:-}" ]] || { echo "Variable $v vacía en pve-a.env"; exit 1; }
 done
 [[ "$NAS_IP" != *X* ]] || { echo "NAS_IP sigue con el valor de ejemplo"; exit 1; }
 [[ "$PBS_ROOT_PASSWORD" != "cambiame" ]] || { echo "Cambia PBS_ROOT_PASSWORD"; exit 1; }
+[[ "$VM_PASSWORD" != "cambiame" ]] || { echo "Cambia VM_PASSWORD"; exit 1; }
 [[ $EUID -eq 0 ]] || { echo "Ejecutar como root"; exit 1; }
 
 # Valores por defecto de hostname / MAC (IP vacía = DHCP)
@@ -146,8 +147,10 @@ EOF
 
 # ---------------------------------------------------------------- helpers
 render_snippet() {  # render_snippet <src.yaml> <dst-name> <hostname>
+  local hash; hash="$(openssl passwd -6 -stdin <<<"$VM_PASSWORD")"
   sed -e "s|__SSH_PUBKEY__|${SSH_PUBKEY}|g" \
       -e "s|__VM_USER__|${VM_USER}|g" \
+      -e "s|__VM_PASSWD_HASH__|${hash}|g" \
       -e "s|__HOSTNAME__|$3|g" \
       -e "s|__LAN_DOMAIN__|${LAN_DOMAIN}|g" \
       "$1" > "${SNIPPETS_DIR}/$2"
@@ -196,7 +199,7 @@ stage_template() {
     --scsihw virtio-scsi-single \
     --net0 virtio,bridge=vmbr0 \
     --agent enabled=1,fstrim_cloned_disks=1 \
-    --serial0 socket --vga serial0 \
+    --serial0 socket --vga std \
     --tags template
   qm set 9000 --scsi0 "${STORAGE}:0,import-from=${IMG_FILE},discard=on,ssd=1,iothread=1"
   qm set 9000 --ide2 "${STORAGE}:cloudinit" --boot order=scsi0
@@ -285,7 +288,9 @@ Components: pbs-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
 EOF
     apt-get update -qq && apt-get install -y -qq proxmox-backup-server >/dev/null
-    proxmox-backup-manager datastore create nas /mnt/datastore/nas --gc-schedule "sun 04:00"
+    # Si el NAS ya tiene copias (.chunks), se reutiliza el datastore en vez de fallar
+    reuse=""; [[ -d /mnt/datastore/nas/.chunks ]] && reuse="--reuse-datastore true"
+    proxmox-backup-manager datastore create nas /mnt/datastore/nas --gc-schedule "sun 04:00" $reuse
     proxmox-backup-manager prune-job create prune-nas --store nas --schedule "daily 03:30" \
       --keep-daily 7 --keep-weekly 4 --keep-monthly 3 2>/dev/null || true
     proxmox-backup-manager verify-job create verify-nas --store nas --schedule "sat 05:00" --ignore-verified true --outdated-after 30 2>/dev/null || true
