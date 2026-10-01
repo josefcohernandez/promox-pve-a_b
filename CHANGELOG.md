@@ -1,5 +1,13 @@
 # Changelog
 
+Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versiones [SemVer](https://semver.org/lang/es/) `vX.Y.Z`.
+Cada PR añade su línea en *Unreleased*; al publicar, *Unreleased* pasa a `## [X.Y.Z] - AAAA-MM-DD`.
+
+## [Unreleased]
+
+### Cambiado
+- Adopta la metodología común: CI con gitleaks, shellcheck y YAML de los snippets (`scripts/check.sh`), título del PR comprobado, `release.yml` desde `workflow_dispatch`, plantillas de issue y PR y `.gitignore` (incluye los `*.env` con contraseñas).
+
 ## v0.1.0 — 2026-09-30
 
 ### Añadido
