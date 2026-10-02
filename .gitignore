@@ -1,0 +1,12 @@
+# Configuración de cada nodo (pve-a.env, pve-b.env): lleva contraseñas.
+*.env
+
+# >>> metodología común
+.env
+.env.*
+!.env.example
+data/
+.claude/worktrees/
+.claude/settings.local.json
+CLAUDE.local.md
+# <<< metodología común
